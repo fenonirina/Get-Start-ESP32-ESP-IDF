@@ -1,46 +1,49 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include "inttypes.h"
 
-#define interrupt_pin        5
-uint16_t interrupt_count =   0;
-bool button_state        =   false;
+#define LED_GPIO    GPIO_NUM_2
+#define BUTTON_GPIO GPIO_NUM_5
 
+static const char *TAG = "main";
+
+// État partagé de la LED (doit être volatile car modifié dans une ISR)
+static volatile int led_state = 0;
+
+// Gestionnaire d'interruption (ISR) exécuté directement lors de l'appui
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
-
-    interrupt_count ++;
-    button_state    = true;
-
-    gpio_isr_handler_add(interrupt_pin, gpio_isr_handler, NULL);
-    gpio_intr_enable(interrupt_pin);
+    // Inversion de l'état de la LED
+    led_state = !led_state;
+    gpio_set_level(LED_GPIO, led_state);
 }
 
 void app_main(void)
 {
-    gpio_reset_pin(interrupt_pin);
-    gpio_set_direction(interrupt_pin, GPIO_MODE_INPUT);
+    // Configuration de la LED (Sortie)
+    gpio_reset_pin(LED_GPIO);
+    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_GPIO, led_state);
 
-    gpio_set_pull_mode(interrupt_pin, GPIO_PULLUP_ONLY);
+    // Configuration du Bouton (Entrée avec Pull-Up et Interruption sur front descendant)
+    gpio_reset_pin(BUTTON_GPIO);
+    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
+    gpio_set_intr_type(BUTTON_GPIO, GPIO_INTR_NEGEDGE);
 
-    gpio_set_intr_type(interrupt_pin, GPIO_INTR_POSEDGE);
-
+    // Installation du service d'interruption global pour les GPIO
     gpio_install_isr_service(0);
-    gpio_isr_handler_add(interrupt_pin, gpio_isr_handler, NULL);
+    
+    // Association de notre fonction ISR à la broche du bouton
+    gpio_isr_handler_add(BUTTON_GPIO, gpio_isr_handler, NULL);
 
-    gpio_intr_enable(interrupt_pin);
+    ESP_LOGI(TAG, "Interruption GPIO configurée sur le bouton (GPIO %d)", BUTTON_GPIO);
 
-    while(1)
-    {
-        if(button_state == true)
-        {
-            printf("%d\n", interrupt_count);
-            button_state = false;
-        }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-
+    // app_main peut simplement se terminer ou tourner au ralenti, 
+    // l'interruption gère tout en arrière-plan.
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
-
 }
