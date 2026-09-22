@@ -1,34 +1,53 @@
 #include <stdio.h>
-#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "esp_log.h"
 
-#define Led    2
-#define Button 5
+#define LED_GPIO    GPIO_NUM_2
+#define BUTTON_GPIO GPIO_NUM_5
+
+static const char *TAG = "main";
 
 void app_main(void)
 {
-    gpio_reset_pin(Led);
-    gpio_reset_pin(Button);
+    // Configuration de la LED (Sortie)
+    gpio_reset_pin(LED_GPIO);
+    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
 
-    gpio_set_direction(Led, GPIO_MODE_OUTPUT);
+    // Configuration du Bouton (Entrée avec Pull-Up)
+    gpio_reset_pin(BUTTON_GPIO);
+    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
 
-    gpio_set_pull_mode(Button, GPIO_PULLUP_ONLY);
-    gpio_set_direction(Button, GPIO_MODE_INPUT);
+    ESP_LOGI(TAG, "Système prêt. Appuyez sur le bouton du GPIO %d pour basculer la LED sur GPIO %d.", BUTTON_GPIO, LED_GPIO);
 
-    while(true)
-    {
-        int status = gpio_get_level(Button);
+    int last_button_state = 1; // État initial (Relâché = HIGH grâce au Pull-Up)
+    int led_state = 0;          // État initial de la LED (Éteinte = LOW)
 
-        if(status == false)
-        {
-            gpio_set_level(Led, true);
+    // S'assurer que la LED est bien éteinte au démarrage
+    gpio_set_level(LED_GPIO, led_state);
+
+    while (1) {
+        int current_button_state = gpio_get_level(BUTTON_GPIO);
+
+        // Détection du front descendant : le bouton passe de HIGH (1) à LOW (0) -> Appui sur le bouton
+        if (last_button_state == 1 && current_button_state == 0) {
+            
+            // Inversement de l'état de la LED
+            led_state = !led_state;
+            gpio_set_level(LED_GPIO, led_state);
+
+            ESP_LOGI(TAG, "Bouton appuyé ! Nouvel état de la LED : %s", led_state ? "ALLUMÉE" : "ÉTEINTE");
+
+            // Anti-rebond (debounce) : pause de 50 ms pour ignorer les parasites mécaniques
+            vTaskDelay(50 / portTICK_PERIOD_MS);
         }
-        else
-        {
-            gpio_set_level(Led, false);
-        }
 
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        // Mettre à jour le dernier état connu du bouton
+        last_button_state = current_button_state;
+
+        // Pause de boucle pour laisser la main à FreeRTOS
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
-
 }
